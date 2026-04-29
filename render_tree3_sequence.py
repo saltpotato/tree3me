@@ -216,6 +216,84 @@ def draw_tree(ax, root: Node, title: str):
     ax.axis("off")
     ax.set_title(title, fontsize=10, pad=4)
 
+def count_nodes(root: Node) -> int:
+    return 1 + sum(count_nodes(ch) for ch in root.children)
+
+def choose_trees_per_page(trees):
+    max_nodes = max(count_nodes(root) for _, root in trees)
+
+    if max_nodes > 60:
+        return 1
+    elif max_nodes > 30:
+        return 4
+    elif max_nodes > 15:
+        return 6
+    else:
+        return 12
+
+def render_pages(trees):
+    trees_per_page = choose_trees_per_page(trees)
+
+    n = len(trees)
+    page_count = math.ceil(n / trees_per_page)
+
+    figsize = (QHD_WIDTH / DPI, QHD_HEIGHT / DPI)
+
+    for page_idx in range(page_count):
+        start = page_idx * trees_per_page
+        end = min(start + trees_per_page, n)
+        chunk = trees[start:end]
+
+        k = len(chunk)
+
+        # simple layouts depending on number per page
+        if k == 1:
+            rows, cols = 1, 1
+        elif k <= 2:
+            rows, cols = 1, 2
+        elif k <= 4:
+            rows, cols = 2, 2
+        elif k <= 6:
+            rows, cols = 2, 3
+        else:
+            rows, cols = 3, 4
+
+        fig, axes = plt.subplots(rows, cols, figsize=figsize, dpi=DPI)
+        fig.suptitle(
+            f"TREE(3) accepted sequence – page {page_idx + 1}/{page_count}",
+            fontsize=18
+        )
+
+        if rows == 1 and cols == 1:
+            axes = [[axes]]
+        elif rows == 1:
+            axes = [axes]
+        elif cols == 1:
+            axes = [[ax] for ax in axes]
+
+        flat_axes = [ax for row in axes for ax in row]
+
+        for ax, (idx, root) in zip(flat_axes, chunk):
+            n_nodes = count_nodes(root)
+            draw_tree(ax, root, title=f"#{idx}  ({n_nodes} nodes)")
+
+        for ax in flat_axes[len(chunk):]:
+            ax.axis("off")
+
+        legend_handles = [
+            Patch(facecolor=LABEL_COLORS.get(1, DEFAULT_COLOR), edgecolor="black", label="label 1"),
+            Patch(facecolor=LABEL_COLORS.get(2, DEFAULT_COLOR), edgecolor="black", label="label 2"),
+            Patch(facecolor=LABEL_COLORS.get(3, DEFAULT_COLOR), edgecolor="black", label="label 3"),
+        ]
+        fig.legend(handles=legend_handles, loc="lower center", ncol=3, fontsize=11)
+
+        plt.tight_layout(rect=[0.01, 0.05, 0.99, 0.95])
+
+        filename = f"tree_page_{page_idx + 1:02d}.png"
+        fig.savefig(filename, dpi=DPI)
+        print(f"Saved {filename}")
+
+    plt.show()
 
 # =========================
 # Main
@@ -231,55 +309,7 @@ def main():
         print("No accepted trees found.")
         return
 
-    n = len(trees)
-
-    # Choose a grid shape that fits QHD reasonably well
-    aspect = QHD_WIDTH / QHD_HEIGHT
-    cols = math.ceil(math.sqrt(n * aspect))
-    rows = math.ceil(n / cols)
-
-    figsize = (QHD_WIDTH / DPI, QHD_HEIGHT / DPI)
-    fig, axes = plt.subplots(rows, cols, figsize=figsize, dpi=DPI)
-    fig.suptitle(f"TREE(3) accepted sequence ({n} trees)", fontsize=18)
-
-    if rows == 1 and cols == 1:
-        axes = [[axes]]
-    elif rows == 1:
-        axes = [axes]
-    elif cols == 1:
-        axes = [[ax] for ax in axes]
-
-    flat_axes = [ax for row in axes for ax in row]
-
-    for ax, (idx, root) in zip(flat_axes, trees):
-        draw_tree(ax, root, title=f"#{idx}")
-
-    for ax in flat_axes[len(trees):]:
-        ax.axis("off")
-
-    # Legend
-    legend_handles = [
-        Patch(facecolor=LABEL_COLORS.get(1, DEFAULT_COLOR), edgecolor="black", label="label 1"),
-        Patch(facecolor=LABEL_COLORS.get(2, DEFAULT_COLOR), edgecolor="black", label="label 2"),
-        Patch(facecolor=LABEL_COLORS.get(3, DEFAULT_COLOR), edgecolor="black", label="label 3"),
-    ]
-    fig.legend(handles=legend_handles, loc="lower center", ncol=3, fontsize=11)
-
-    plt.tight_layout(rect=[0.01, 0.05, 0.99, 0.95])
-
-    # Save QHD image
-    fig.savefig(OUTPUT_IMAGE, dpi=DPI)
-    print(f"Saved image to: {OUTPUT_IMAGE}")
-
-    # Try to maximize the window
-    manager = plt.get_current_fig_manager()
-    try:
-        manager.window.showMaximized()
-    except Exception:
-        pass
-
-    plt.show()
-
+    render_pages(trees)
 
 if __name__ == "__main__":
     main()

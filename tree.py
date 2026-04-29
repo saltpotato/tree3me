@@ -205,19 +205,101 @@ def acceptable_candidate(history, candidate):
 def contains_label(t, label):
     return t.label == label or any(contains_label(c, label) for c in t.children)
 
-def count_label(t, label):
+def count_label(t: Tree, label: int) -> int:
     return (1 if t.label == label else 0) + sum(count_label(c, label) for c in t.children)
 
 
-def tree_score(t):
+def branching_penalty(t: Tree) -> int:
+    return len(t.children) + sum(branching_penalty(c) for c in t.children)
+
+
+def tree_score(t: Tree) -> int:
     return (
         t.size * 100
-        - count_label(t, 1) * 80
-        - count_label(t, 2) * 10
+        - count_label(t, 1) * 200
+        - count_label(t, 2) * 20
+        - branching_penalty(t) * 5
+    )
+def propose_candidate(history, min_size: int, max_size: int, label_count: int) -> Tree:
+    """
+    As the sequence gets longer, drift toward larger trees.
+    """
+    growth_bonus = len(history) // 5
+
+    size = random.randint(
+        min_size + growth_bonus,
+        max_size + growth_bonus,
     )
 
-def count_label(t, label):
-    return (1 if t.label == label else 0) + sum(count_label(c, label) for c in t.children)
+    return random_tree_exact_size(
+        size=size,
+        label_count=label_count,
+        avoid_label_1=(len(history) < 40),
+        max_children_limit=4,
+    )
+
+def random_composition_positive(total: int, parts: int) -> tuple[int, ...]:
+    """
+    Split total into `parts` positive integers.
+    Example: total=10, parts=3 -> (2,5,3)
+    """
+    if parts == 1:
+        return (total,)
+
+    cuts = sorted(random.sample(range(1, total), parts - 1))
+    values = []
+    prev = 0
+
+    for cut in cuts:
+        values.append(cut - prev)
+        prev = cut
+
+    values.append(total - prev)
+    return tuple(values)
+
+
+def random_tree_exact_size(
+    size: int,
+    label_count: int = 3,
+    avoid_label_1: bool = True,
+    max_children_limit: int = 4,
+) -> Tree:
+    """
+    Builds one random tree with exactly `size` nodes.
+    Does not enumerate all possible trees.
+    """
+
+    if size < 1:
+        raise ValueError("size must be >= 1")
+
+    if avoid_label_1:
+        labels = list(range(2, label_count + 1))  # [2, 3]
+    else:
+        labels = list(range(1, label_count + 1))  # [1, 2, 3]
+
+    label = random.choice(labels)
+
+    if size == 1:
+        return Tree(label)
+
+    remaining = size - 1
+
+    max_children = min(remaining, max_children_limit)
+    child_count = random.randint(1, max_children)
+
+    parts = random_composition_positive(remaining, child_count)
+
+    children = tuple(
+        random_tree_exact_size(
+            size=part,
+            label_count=label_count,
+            avoid_label_1=avoid_label_1,
+            max_children_limit=max_children_limit,
+        )
+        for part in parts
+    )
+
+    return Tree(label, children)
 
 if __name__ == "__main__":
     import random
@@ -227,26 +309,29 @@ if __name__ == "__main__":
     label_count = 3
     target_steps = 50
 
-    # Less destructive start than 3 -> 3
-    history = [Tree(3, (Tree(2),))]
+    min_size = 20
+    max_size = 30
+    attempts_per_step = 5000
+
+    history = [
+        random_tree_exact_size(
+            size=20,
+            label_count=label_count,
+            avoid_label_1=True,
+            max_children_limit=4,
+        )
+    ]
 
     print("accepted 1")
+    print(f"size = {history[0].size}")
     print(history[0].pretty())
-
-    min_size = 2
-    max_size = 6
-    attempts_per_step = 1000
-
-    test = Tree(2, (Tree(2),))
-    print("test candidate:")
-    print(test.pretty())
-    print("valid?", valid_next(history, test))
 
     while len(history) < target_steps:
         valid_candidates = []
 
         for attempt in range(1, attempts_per_step + 1):
-            candidate = random_tree_between_sizes(
+            candidate = propose_candidate(
+                history=history,
                 min_size=min_size,
                 max_size=max_size,
                 label_count=label_count,
@@ -259,29 +344,30 @@ if __name__ == "__main__":
                 print(
                     f"step {len(history) + 1}, "
                     f"attempt {attempt}, "
-                    f"max_size {max_size}, "
-                    f"valid {len(valid_candidates)}"
+                    f"valid {len(valid_candidates)}, "
+                    f"size-range {min_size}-{max_size}"
                 )
 
-            # stop sampling early once we have enough choices
             if len(valid_candidates) >= 100:
                 break
 
         if valid_candidates:
-            # Toy heuristic: tiny trees are usually too general, so choose the largest.
             candidate = max(valid_candidates, key=tree_score)
-
             history.append(candidate)
 
             print()
             print(f"accepted {len(history)}")
             print(f"size = {candidate.size}")
             print(candidate.pretty())
+
         else:
             print()
-            print(f"failed after {attempts_per_step} attempts at step {len(history) + 1}")
-            print(f"increasing max_size from {max_size} to {max_size + 2}")
-            max_size += 2
+            print(f"failed at step {len(history) + 1}")
+            print(f"increasing size range from {min_size}-{max_size}")
+
+            min_size += 5
+            max_size += 10
 
     print()
     print(f"done: built {len(history)} trees")
+    print("sizes:", [t.size for t in history])
