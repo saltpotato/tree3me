@@ -182,9 +182,7 @@ def tree_depth(root: Node) -> int:
 # Drawing
 # =========================
 
-def draw_tree(ax, root: Node, title: str):
-    positions = compute_positions(root)
-
+def draw_tree(ax, root: Node, positions: Dict[int, Tuple[float, float]], max_x_span: float, max_y_span: float, title: str):
     def draw_edges(node: Node):
         x1, y1 = positions[node.uid]
         for child in node.children:
@@ -207,10 +205,16 @@ def draw_tree(ax, root: Node, title: str):
     xs = [p[0] for p in positions.values()]
     ys = [p[1] for p in positions.values()]
 
+    # Find the center of the current tree
+    center_x = (min(xs) + max(xs)) / 2 if xs else 0
+    center_y = (min(ys) + max(ys)) / 2 if ys else 0
+
     margin_x = 0.6
     margin_y = 0.5
-    ax.set_xlim(min(xs) - margin_x, max(xs) + margin_x)
-    ax.set_ylim(min(ys) - margin_y, max(ys) + margin_y)
+    
+    # Apply global bounds centered on this specific tree's center
+    ax.set_xlim(center_x - max_x_span / 2 - margin_x, center_x + max_x_span / 2 + margin_x)
+    ax.set_ylim(center_y - max_y_span / 2 - margin_y, center_y + max_y_span / 2 + margin_y)
 
     ax.set_aspect("equal", adjustable="box")
     ax.axis("off")
@@ -232,8 +236,25 @@ def choose_trees_per_page(trees):
         return 12
 
 def render_pages(trees):
-    trees_per_page = choose_trees_per_page(trees)
+    # 1. Pre-compute positions and find the global maximum bounds
+    precomputed_data = []
+    max_x_span = 0.0
+    max_y_span = 0.0
 
+    for idx, root in trees:
+        positions = compute_positions(root)
+        xs = [p[0] for p in positions.values()]
+        ys = [p[1] for p in positions.values()]
+        
+        x_span = max(xs) - min(xs) if xs else 0
+        y_span = max(ys) - min(ys) if ys else 0
+
+        max_x_span = max(max_x_span, x_span)
+        max_y_span = max(max_y_span, y_span)
+
+        precomputed_data.append((idx, root, positions))
+
+    trees_per_page = choose_trees_per_page(trees)
     n = len(trees)
     page_count = math.ceil(n / trees_per_page)
 
@@ -242,7 +263,7 @@ def render_pages(trees):
     for page_idx in range(page_count):
         start = page_idx * trees_per_page
         end = min(start + trees_per_page, n)
-        chunk = trees[start:end]
+        chunk = precomputed_data[start:end]
 
         k = len(chunk)
 
@@ -273,9 +294,10 @@ def render_pages(trees):
 
         flat_axes = [ax for row in axes for ax in row]
 
-        for ax, (idx, root) in zip(flat_axes, chunk):
+        # 2. Draw using the precomputed global spans
+        for ax, (idx, root, positions) in zip(flat_axes, chunk):
             n_nodes = count_nodes(root)
-            draw_tree(ax, root, title=f"#{idx}  ({n_nodes} nodes)")
+            draw_tree(ax, root, positions, max_x_span, max_y_span, title=f"#{idx}  ({n_nodes} nodes)")
 
         for ax in flat_axes[len(chunk):]:
             ax.axis("off")
