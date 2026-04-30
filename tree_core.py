@@ -90,22 +90,88 @@ def acceptable_candidate(history, candidate):
 
     return valid_next(history, candidate)
 
-def contains_label(t, label):
+
+def contains_label(t: Tree, label: int) -> bool:
     return t.label == label or any(contains_label(c, label) for c in t.children)
+
 
 def count_label(t: Tree, label: int) -> int:
     return (1 if t.label == label else 0) + sum(count_label(c, label) for c in t.children)
 
 
+def height(t: Tree) -> int:
+    if not t.children:
+        return 1
+    return 1 + max(height(c) for c in t.children)
+
+
+def leaf_count(t: Tree) -> int:
+    if not t.children:
+        return 1
+    return sum(leaf_count(c) for c in t.children)
+
+
+def max_branching(t: Tree) -> int:
+    return max([len(t.children)] + [max_branching(c) for c in t.children])
+
+
+def total_branching(t: Tree) -> int:
+    return len(t.children) + sum(total_branching(c) for c in t.children)
+
+
 def branching_penalty(t: Tree) -> int:
-    return len(t.children) + sum(branching_penalty(c) for c in t.children)
+    return total_branching(t)
+
+
+def tree_features(t: Tree) -> tuple[int, ...]:
+    """
+    Simple numeric feature vector for later ML.
+    No ML yet. Just stable hand-made features.
+    """
+    return (
+        t.size,
+        height(t),
+        leaf_count(t),
+        max_branching(t),
+        total_branching(t),
+        t.label,
+        count_label(t, 1),
+        count_label(t, 2),
+        count_label(t, 3),
+    )
+
+
+def history_features(history: list[Tree]) -> tuple[int, ...]:
+    """
+    Compact features of the current accepted sequence.
+    Useful later as ML state input.
+    """
+    if not history:
+        return (0, 0, 0, 0, 0, 0)
+
+    sizes = [t.size for t in history]
+    heights = [height(t) for t in history]
+
+    return (
+        len(history),
+        min(sizes),
+        max(sizes),
+        sum(sizes),
+        max(heights),
+        sum(count_label(t, 1) for t in history),
+    )
+
 
 def tree_score(t: Tree) -> int:
+    """
+    Current heuristic baseline.
+    Later ML should try to beat this.
+    """
     return (
-        t.size * 100
         - count_label(t, 1) * 200
-        - count_label(t, 2) * 20
         - branching_penalty(t) * 5
+        + height(t) * 20
+        + count_label(t, 3) * 10
     )
 
 def propose_candidate(history, min_size: int, max_size: int, label_count: int) -> Tree:
@@ -144,6 +210,7 @@ def random_composition_positive(total: int, parts: int) -> tuple[int, ...]:
 
     values.append(total - prev)
     return tuple(values)
+
 
 def random_tree_exact_size(
     size: int,
@@ -188,72 +255,18 @@ def random_tree_exact_size(
 
     return Tree(label, children)
 
-if __name__ == "__main__":
+def verify_history(history: list[Tree]) -> bool:
+    """
+    Safety check: verifies the whole bad-sequence condition.
+    """
+    for i in range(len(history)):
+        for j in range(i + 1, len(history)):
+            if embeds(history[i], history[j]):
+                print("BAD SEQUENCE VIOLATION")
+                print("i =", i + 1)
+                print(history[i].pretty())
+                print("j =", j + 1)
+                print(history[j].pretty())
+                return False
 
-    random.seed()
-
-    label_count = 3
-    target_steps = 50
-
-    min_size = 20
-    max_size = 30
-    attempts_per_step = 5000
-
-    history = [
-        random_tree_exact_size(
-            size=20,
-            label_count=label_count,
-            avoid_label_1=True,
-            max_children_limit=4,
-        )
-    ]
-
-    print("accepted 1")
-    print(f"size = {history[0].size}")
-    print(history[0].pretty())
-
-    while len(history) < target_steps:
-        valid_candidates = []
-
-        for attempt in range(1, attempts_per_step + 1):
-            candidate = propose_candidate(
-                history=history,
-                min_size=min_size,
-                max_size=max_size,
-                label_count=label_count,
-            )
-
-            if acceptable_candidate(history, candidate):
-                valid_candidates.append(candidate)
-
-            if attempt % 1000 == 0:
-                print(
-                    f"step {len(history) + 1}, "
-                    f"attempt {attempt}, "
-                    f"valid {len(valid_candidates)}, "
-                    f"size-range {min_size}-{max_size}"
-                )
-
-            if len(valid_candidates) >= 100:
-                break
-
-        if valid_candidates:
-            candidate = max(valid_candidates, key=tree_score)
-            history.append(candidate)
-
-            print()
-            print(f"accepted {len(history)}")
-            print(f"size = {candidate.size}")
-            print(candidate.pretty())
-
-        else:
-            print()
-            print(f"failed at step {len(history) + 1}")
-            print(f"increasing size range from {min_size}-{max_size}")
-
-            min_size += 5
-            max_size += 10
-
-    print()
-    print(f"done: built {len(history)} trees")
-    print("sizes:", [t.size for t in history])
+    return True
