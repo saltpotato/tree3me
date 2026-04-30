@@ -2,10 +2,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from functools import lru_cache
-from itertools import product
-from typing import Iterable, Tuple
-
-
+from typing import Tuple
+import random
 
 @dataclass(frozen=True)
 class Tree:
@@ -21,90 +19,6 @@ class Tree:
         for child in self.children:
             lines.append(child.pretty(indent + "  "))
         return "\n".join(lines)
-
-
-def integer_compositions(n: int) -> Iterable[Tuple[int, ...]]:
-    """
-    Ordered compositions of n.
-    Example: n=3 -> (3), (1,2), (2,1), (1,1,1)
-    Used to split remaining nodes among children.
-    """
-    if n == 0:
-        yield ()
-        return
-
-    for first in range(1, n + 1):
-        for rest in integer_compositions(n - first):
-            yield (first,) + rest
-
-
-@lru_cache(maxsize=None)
-def shapes_of_size(size: int) -> Tuple[Tuple, ...]:
-    """
-    Generate unlabeled ordered tree shapes.
-
-    Shape format:
-        ()                      leaf
-        (child_shape_1, ...)    internal node
-    """
-    if size < 1:
-        return ()
-
-    if size == 1:
-        return ((),)
-
-    result = []
-
-    remaining = size - 1
-
-    for child_sizes in integer_compositions(remaining):
-        child_shape_lists = [shapes_of_size(s) for s in child_sizes]
-
-        for children in product(*child_shape_lists):
-            result.append(children)
-
-    return tuple(result)
-
-
-def label_shape(shape: Tuple, labels: range) -> Iterable[Tree]:
-    """
-    Assign labels to every node of an unlabeled shape.
-    """
-    child_variants = [list(label_shape(child, labels)) for child in shape]
-
-    for root_label in labels:
-        if not child_variants:
-            yield Tree(root_label)
-        else:
-            for children in product(*child_variants):
-                yield Tree(root_label, tuple(children))
-
-
-def trees_of_size(size: int, label_count: int = 3) -> Iterable[Tree]:
-    """
-    Generate all ordered labeled trees with exactly `size` nodes.
-    Labels are 1..label_count.
-    """
-    labels = range(1, label_count + 1)
-
-    for shape in shapes_of_size(size):
-        yield from label_shape(shape, labels)
-
-
-def all_trees(label_count: int = 3) -> Iterable[Tree]:
-    """
-    Infinite generator:
-    size 1, then size 2, then size 3, ...
-    """
-    size = 1
-
-    while True:
-        yield from trees_of_size(size, label_count)
-        size += 1
-from functools import lru_cache
-from dataclasses import dataclass
-from typing import Tuple
-
 
 def embeds(a: Tree, b: Tree) -> bool:
     """
@@ -158,37 +72,12 @@ def embeds(a: Tree, b: Tree) -> bool:
 
     return rec(a, b)
 
-import random
-
-
 def valid_next(history, candidate):
     """
     TREE bad-sequence condition:
     no earlier tree may embed into the later candidate.
     """
     return all(not embeds(old, candidate) for old in history)
-
-
-def random_tree_of_size(size: int, label_count: int = 3) -> Tree:
-    candidates = list(trees_of_size(size, label_count))
-    return random.choice(candidates)
-
-
-def random_tree_between_sizes(min_size: int, max_size: int, label_count: int = 3) -> Tree:
-    size = random.randint(min_size, max_size)
-    return random_tree_of_size(size, label_count)
-
-def is_not_too_destructive(t: Tree) -> bool:
-    # Toy heuristic: avoid root label 1 early.
-    return t.label != 1
-
-def random_tree_all_label_3(size: int) -> Tree:
-    shape = random.choice(list(shapes_of_size(size)))
-
-    def build(s):
-        return Tree(3, tuple(build(c) for c in s))
-
-    return build(shape)
 
 def acceptable_candidate(history, candidate):
     # Do not allow tiny poison trees early.
@@ -201,7 +90,6 @@ def acceptable_candidate(history, candidate):
 
     return valid_next(history, candidate)
 
-
 def contains_label(t, label):
     return t.label == label or any(contains_label(c, label) for c in t.children)
 
@@ -212,7 +100,6 @@ def count_label(t: Tree, label: int) -> int:
 def branching_penalty(t: Tree) -> int:
     return len(t.children) + sum(branching_penalty(c) for c in t.children)
 
-
 def tree_score(t: Tree) -> int:
     return (
         t.size * 100
@@ -220,6 +107,7 @@ def tree_score(t: Tree) -> int:
         - count_label(t, 2) * 20
         - branching_penalty(t) * 5
     )
+
 def propose_candidate(history, min_size: int, max_size: int, label_count: int) -> Tree:
     """
     As the sequence gets longer, drift toward larger trees.
@@ -256,7 +144,6 @@ def random_composition_positive(total: int, parts: int) -> tuple[int, ...]:
 
     values.append(total - prev)
     return tuple(values)
-
 
 def random_tree_exact_size(
     size: int,
@@ -302,7 +189,6 @@ def random_tree_exact_size(
     return Tree(label, children)
 
 if __name__ == "__main__":
-    import random
 
     random.seed()
 
