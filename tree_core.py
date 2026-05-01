@@ -72,24 +72,6 @@ def embeds(a: Tree, b: Tree) -> bool:
 
     return rec(a, b)
 
-def valid_next(history, candidate):
-    """
-    TREE bad-sequence condition:
-    no earlier tree may embed into the later candidate.
-    """
-    return all(not embeds(old, candidate) for old in history)
-
-def acceptable_candidate(history, candidate):
-    # Do not allow tiny poison trees early.
-    if len(history) < 40 and candidate.size < 4:
-        return False
-
-    # Avoid label 1 early.
-    if len(history) < 25 and contains_label(candidate, 1):
-        return False
-
-    return valid_next(history, candidate)
-
 
 def contains_label(t: Tree, label: int) -> bool:
     return t.label == label or any(contains_label(c, label) for c in t.children)

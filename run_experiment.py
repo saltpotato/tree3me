@@ -5,33 +5,9 @@ from tree_core import (
     Tree,
     random_tree_exact_size,
     tree_score,
-    valid_next,
+    embeds,
     verify_history,
 )
-
-
-def propose_benchmark_candidate(
-    label_count: int = 3,
-    min_size: int = 2,
-    max_size: int = 10,
-) -> Tree:
-    size = random.randint(min_size, max_size)
-
-    # For benchmark: allow all labels, including 1.
-    # This makes the game harder and more honest.
-    return random_tree_exact_size(
-        size=size,
-        label_count=label_count,
-        avoid_label_1=False,
-        max_children_limit=4,
-    )
-
-
-def benchmark_valid_candidate(history: list[Tree], candidate: Tree) -> bool:
-    # For the benchmark, only the real TREE condition counts.
-    # No hand filters like "avoid label 1 early".
-    return valid_next(history, candidate)
-
 
 def choose_random(valid_candidates: list[Tree]) -> Tree:
     return random.choice(valid_candidates)
@@ -65,13 +41,19 @@ def run_benchmark_episode(
         valid_candidates = []
 
         for _ in range(attempts_per_move):
-            candidate = propose_benchmark_candidate(
-                label_count=label_count,
-                min_size=min_size,
-                max_size=max_size,
-            )
+            # For benchmark: allow all labels, including 1.
+            # This makes the game harder and more honest.
 
-            if benchmark_valid_candidate(history, candidate):
+            candidate = random_tree_exact_size(
+                size = random.randint(min_size, max_size),
+                label_count=label_count,
+                avoid_label_1=False,
+                max_children_limit=4,
+            );
+
+            # For the benchmark, only the real TREE condition counts.
+            # No hand filters like "avoid label 1 early".
+            if all(not embeds(old, candidate) for old in history):
                 valid_candidates.append(candidate)
 
         if not valid_candidates:
@@ -108,7 +90,7 @@ def run_episode_job(args):
         label_count=3,
         min_size=6,
         max_size=6,
-        attempts_per_move=50,
+        attempts_per_move=5,
         max_steps=max_steps,
         verbose=False,
         verify=False,
@@ -132,7 +114,7 @@ def run_benchmark(
         scores = []
 
         
-        jobs = [(name, base_seed + i, max_steps) for i in range(episodes)]
+        jobs = [(name, base_seed + i) for i in range(episodes)]
 
         with ProcessPoolExecutor(max_workers=3) as pool:
             scores = list(pool.map(run_episode_job, jobs))
