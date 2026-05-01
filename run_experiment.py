@@ -20,6 +20,10 @@ def choose_largest(valid_candidates: list[Tree]) -> Tree:
 def choose_heuristic(valid_candidates: list[Tree]) -> Tree:
     return max(valid_candidates, key=tree_score)
 
+def choose_heuristic_epsilon(valid_candidates: list[Tree]) -> Tree:
+    if random.random() < 0.10:
+        return random.choice(valid_candidates)
+    return max(valid_candidates, key=tree_score)
 
 def run_benchmark_episode(
     chooser,
@@ -75,17 +79,18 @@ def run_benchmark_episode(
 
 from concurrent.futures import ProcessPoolExecutor
 
+AGENTS = {
+    "random": choose_random,
+    "largest": choose_largest,
+    "heuristic": choose_heuristic,
+    "heuristic_epsilon": choose_heuristic_epsilon,
+}
+
 def run_episode_job(args):
     name, seed, max_steps = args
 
-    chooser_map = {
-        "random": choose_random,
-        "largest": choose_largest,
-        "heuristic": choose_heuristic,
-    }
-
     history = run_benchmark_episode(
-        chooser=chooser_map[name],
+        chooser=AGENTS[name],
         seed=seed,
         label_count=3,
         min_size=6,
@@ -102,21 +107,14 @@ def run_benchmark(
     episodes: int,
     base_seed: int = 1234,
 ):
-    agents = {
-        "random": choose_random,
-        "largest": choose_largest,
-        "heuristic": choose_heuristic,
-    }
-
     max_steps = 300
 
-    for name, _ in agents.items():
+    for name in AGENTS:
         scores = []
 
-        
-        jobs = [(name, base_seed + i) for i in range(episodes)]
+        jobs = [(name, base_seed + i, max_steps) for i in range(episodes)]
 
-        with ProcessPoolExecutor(max_workers=3) as pool:
+        with ProcessPoolExecutor(max_workers=6) as pool:
             scores = list(pool.map(run_episode_job, jobs))
 
         print()
