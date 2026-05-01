@@ -2,6 +2,9 @@ import random
 from statistics import mean
 import csv
 import os
+import joblib
+import pandas as pd
+import argparse
 
 from tree_core import (
     Tree,
@@ -24,10 +27,69 @@ def choose_largest(valid_candidates: list[Tree]) -> Tree:
 def choose_heuristic(valid_candidates: list[Tree]) -> Tree:
     return max(valid_candidates, key=tree_score)
 
-def choose_heuristic_epsilon(valid_candidates: list[Tree]) -> Tree:
+def choose_heuristic_epsilon_with_history(history, valid_candidates: list[Tree]) -> Tree:
     if random.random() < 0.10:
         return random.choice(valid_candidates)
     return max(valid_candidates, key=tree_score)
+
+def choose_random_with_history(history, valid_candidates):
+    return choose_random(valid_candidates)
+
+
+def choose_largest_with_history(history, valid_candidates):
+    return choose_largest(valid_candidates)
+
+def choose_heuristic_with_history(history, valid_candidates):
+    return choose_heuristic(valid_candidates)
+
+IMITATION_MODEL = None
+IMITATION_FEATURE_COLUMNS = None
+
+
+def load_imitation_model():
+    global IMITATION_MODEL, IMITATION_FEATURE_COLUMNS
+
+    if IMITATION_MODEL is None:
+        payload = joblib.load("imitation_model.joblib")
+        IMITATION_MODEL = payload["model"]
+        IMITATION_FEATURE_COLUMNS = payload["feature_columns"]
+
+
+def candidate_feature_row(history, candidate):
+    h_feat = history_features(history)
+    c_feat = tree_features(candidate)
+
+    return {
+        "history_len": h_feat[0],
+        "history_min_size": h_feat[1],
+        "history_max_size": h_feat[2],
+        "history_sum_size": h_feat[3],
+        "history_max_height": h_feat[4],
+        "history_label1_count": h_feat[5],
+
+        "candidate_size": c_feat[0],
+        "candidate_height": c_feat[1],
+        "candidate_leaf_count": c_feat[2],
+        "candidate_max_branching": c_feat[3],
+        "candidate_total_branching": c_feat[4],
+        "candidate_root_label": c_feat[5],
+        "candidate_label1_count": c_feat[6],
+        "candidate_label2_count": c_feat[7],
+        "candidate_label3_count": c_feat[8],
+        "candidate_score": tree_score(candidate),
+    }
+
+
+def choose_imitation(history, valid_candidates):
+    load_imitation_model()
+
+    rows = [candidate_feature_row(history, cand) for cand in valid_candidates]
+    X = pd.DataFrame(rows)[IMITATION_FEATURE_COLUMNS]
+
+    probs = IMITATION_MODEL.predict_proba(X)[:, 1]
+
+    best_index = int(probs.argmax())
+    return valid_candidates[best_index]
 
 def append_training_rows(csv_path, rows):
     file_exists = os.path.exists(csv_path)
@@ -91,35 +153,29 @@ def run_benchmark_episode(
 
     history: list[Tree] = []
     data_rows = []
-    pending_rows = []
-
+    
     while len(history) < max_steps:
         valid_candidates = []
 
         for _ in range(attempts_per_move):
-            # For benchmark: allow all labels, including 1.
-            # This makes the game harder and more honest.
-
             candidate = random_tree_exact_size(
-                size = random.randint(min_size, max_size),
+                size=random.randint(min_size, max_size),
                 label_count=label_count,
                 avoid_label_1=False,
                 max_children_limit=4,
-            );
+            )
 
-            # For the benchmark, only the real TREE condition counts.
-            # No hand filters like "avoid label 1 early".
             if all(not embeds(old, candidate) for old in history):
                 valid_candidates.append(candidate)
 
-            if not valid_candidates:
-                break
+        # Episode ends if this move found no valid candidates.
+        if not valid_candidates:
+            break
 
-            chosen = chooser(valid_candidates)
+        chosen = chooser(history, valid_candidates)
 
-            if collect_data:
-                h_feat = history_features(history)
-
+        if collect_data:
+            h_feat = history_features(history)
             pending_rows = []
 
             for idx, cand in enumerate(valid_candidates):
@@ -132,7 +188,7 @@ def run_benchmark_episode(
                     "step": len(history) + 1,
                     "candidate_index": idx,
                     "chosen": 1 if cand == chosen else 0,
-                    "episode_final_length": -1,  # filled after episode ends
+                    "episode_final_length": -1,
 
                     "history_len": h_feat[0],
                     "history_min_size": h_feat[1],
@@ -157,7 +213,7 @@ def run_benchmark_episode(
 
             data_rows.extend(pending_rows)
 
-            history.append(chosen)
+        history.append(chosen)
 
         if verbose:
             print()
@@ -167,7 +223,7 @@ def run_benchmark_episode(
 
         if verify:
             assert verify_history(history)
-
+    
     if collect_data:
         final_length = len(history)
         capped = 1 if final_length >= max_steps else 0
@@ -184,14 +240,17 @@ def run_benchmark_episode(
 from concurrent.futures import ProcessPoolExecutor
 
 AGENTS = {
-    # "random": choose_random,
-    # "largest": choose_largest,
-    # "heuristic": choose_heuristic,
-    "heuristic_epsilon": choose_heuristic_epsilon,
+    "random": choose_random_with_history,
+    "largest": choose_largest_with_history,
+    "heuristic": choose_heuristic_with_history,
+    "heuristic_epsilon": choose_heuristic_epsilon_with_history,
+    "imitation": choose_imitation,
 }
 
+COLLECT_DATA = False
+
 def run_episode_job(args):
-    name, seed, max_steps = args
+    name, seed, max_steps, collect_data = args
 
     result = run_benchmark_episode(
         chooser=AGENTS[name],
@@ -199,17 +258,21 @@ def run_episode_job(args):
         label_count=3,
         min_size=6,
         max_size=6,
-        attempts_per_move=5,
+        attempts_per_move=3,
         max_steps=max_steps,
         verbose=False,
         verify=False,
-        collect_data=True,
+        collect_data=collect_data,
         episode_id=seed,
         agent_name=name,
     )
 
-    history, rows = result
-    
+    if isinstance(result, tuple):
+        history, rows = result
+    else:
+        history = result
+        rows = []
+
     return len(history), rows
 
 def run_benchmark(
@@ -221,7 +284,7 @@ def run_benchmark(
     for name in AGENTS:
         scores = []
 
-        jobs = [(name, base_seed + i, max_steps) for i in range(episodes)]
+        jobs = [(name, base_seed + i, max_steps, COLLECT_DATA) for i in range(episodes)]
 
         with ProcessPoolExecutor(max_workers=6) as pool:
             results = list(pool.map(run_episode_job, jobs))
@@ -231,8 +294,12 @@ def run_benchmark(
             all_rows = []
             for _score, rows in results:
                 all_rows.extend(rows)
+            
+            print(f"collected rows: {len(all_rows)}")
 
-            append_training_rows("training_data.csv", all_rows)
+            if COLLECT_DATA and all_rows:
+                append_training_rows("training_data.csv", all_rows)
+                print("wrote training_data.csv")
 
         print()
         print(f"agent: {name}")
@@ -245,4 +312,37 @@ def run_benchmark(
         print(f"capped episodes: {capped}/{episodes}")
 
 if __name__ == "__main__":
-    run_benchmark(episodes=50)
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--mode",
+        choices=["benchmark", "collect"],
+        default="benchmark",
+    )
+    parser.add_argument(
+        "--episodes",
+        type=int,
+        default=50,
+    )
+
+    args = parser.parse_args()
+
+    if args.mode == "collect":
+        COLLECT_DATA = True
+
+        # Clean data: only collect from the heuristic agent.
+        AGENTS.clear()
+        AGENTS.update({
+            "heuristic": choose_heuristic_with_history,
+        })
+
+        print("mode: collect")
+        print("agents:", list(AGENTS.keys()))
+        print("writing to training_data.csv")
+
+    else:
+        COLLECT_DATA = False
+
+        print("mode: benchmark")
+        print("agents:", list(AGENTS.keys()))
+
+    run_benchmark(episodes=args.episodes)

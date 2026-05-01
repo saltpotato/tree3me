@@ -1,3 +1,34 @@
-.txt
-.png
-__pycache__/tree_core.cpython-312.pyc
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+myenv/
+.venv/
+venv/
+env/
+
+# Training/generated data
+training_data.csv
+*.joblib
+*.pkl
+*.pickle
+
+# Outputs / reports / images
+*.png
+*.jpg
+*.jpeg
+*.pdf
+*.txt
+
+# IDE/editor
+.vscode/
+.idea/
+
+# OS
+Thumbs.db
+Desktop.ini
+
+# Logs
+*.log
