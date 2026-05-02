@@ -1,20 +1,25 @@
+
 # TREE(3) Bad Sequence Toy Explorer
 
 This is a small experimental Python project for exploring TREE/Kruskal-style bad sequences of finite labeled rooted trees.
 
-The goal is **not** to compute TREE(3).
-The goal is to build intuition for the dynamics behind TREE-like sequences:
+The goal is **not** to compute TREE(3). The goal is to build intuition for TREE-like dynamics and to experiment with machine learning agents that try to choose good next trees in a shrinking combinatorial search space.
 
-- tree generation
-- homeomorphic embedding
+The project currently explores:
+- rooted labeled tree generation
+- TREE/Kruskal-style homeomorphic embedding  
+- bad-sequence construction
 - forbidden future states
-- random/semi-random survival walks
-- how small accepted trees can destroy the future
+- random and heuristic survival policies
+- benchmark episodes
+- data logging
+- imitation learning from a hand-written heuristic
+
+---
 
 ## Idea
 
 A sequence of trees
-
 ```text
 T1, T2, T3, ...
 ```
@@ -28,21 +33,23 @@ for i < j:
 
 This is the TREE/Kruskal-style bad sequence condition.
 
-The experiment tries to construct such a sequence by randomly proposing candidate trees and accepting only those that satisfy the embedding restriction.
+The experiment tries to build long valid sequences by repeatedly proposing candidate trees and accepting only candidates that satisfy the embedding restriction.
+
+⸻
 
 ## TREE-Style Embedding
 
-The embedding relation used here is intended to model the Kruskal/TREE intuition:
+The embedding relation used here models a Kruskal/TREE-like intuition:
 
-- finite rooted trees
-- node labels from `{1, 2, 3}`
-- label order: `1 <= 2 <= 3`
-- a node labeled `1` may embed into `1`, `2`, or `3`
-- a node labeled `2` may embed into `2` or `3`
-- a node labeled `3` may embed only into `3`
-- ancestor/descendant structure must be preserved
-- intermediate nodes in the target tree may be skipped
-- children are treated as unordered or ordered depending on the implementation variant
+* finite rooted trees
+* node labels from {1, 2, 3}
+* label order: 1 <= 2 <= 3
+* a node labeled 1 may embed into 1, 2, or 3
+* a node labeled 2 may embed into 2 or 3
+* a node labeled 3 may embed only into 3
+* ancestor/descendant structure must be preserved
+* intermediate nodes in the target tree may be skipped
+* children are treated as unordered in the embedding checker
 
 A valid next tree must satisfy:
 
@@ -51,193 +58,330 @@ def valid_next(history, candidate):
     return all(not embeds(old, candidate) for old in history)
 ```
 
+This means that the new candidate must not contain any previous tree as an embedded structural pattern.
+
+⸻
+
 ## Why This Is Hard
 
 A tree can be valid and still be strategically terrible.
 
 For example, accepting a tiny tree like:
-
-```text
+```
 3
 ```
+is often catastrophic because it embeds into every future tree that contains any 3.
 
-is often catastrophic because it embeds into every future tree that contains any `3`.
-
-Likewise, trees containing label `1` are dangerous because `1` embeds into everything above it in the label order.
+Likewise, trees containing label 1 are dangerous because 1 embeds into everything above it in the label order.
 
 This creates a useful toy version of the TREE phenomenon:
 
-> A locally valid move can destroy huge regions of the future search space.
+A locally valid move can destroy huge regions of the future search space.
 
-## Current Strategy
+The core challenge is not only to find a valid next tree, but to find one that keeps the future open.
 
-The program does not enumerate all trees of large size.
-Instead, it directly generates random trees with a requested node count.
+⸻
 
-Candidate generation roughly follows this flow:
-
-1. Generate a random candidate.
-2. Check whether old trees embed into it.
-3. If valid, add it to a candidate pool.
-4. Score the valid candidates.
-5. Accept the best-scoring one.
-
-The score currently favors:
-
-- larger trees
-- fewer label-1 nodes
-- fewer overly general structures
-- less destructive candidate shapes
-
-This is only a heuristic.
-
-## Running
-
-```bash
-python tree.py
-```
-
-Example output:
-
-```text
-accepted 1
-size = 20
-3
-2
-3
-2
-
-step 2, attempt 1000, valid 83, size-range 20-30
-
-accepted 2
-size = 28
-...
-```
-
-## Important Warning
-
-This project does not compute TREE(3).
-
-TREE(3) is vastly beyond brute-force computation.
-
-This project is a toy simulation for studying small fragments of the behavior:
-
-- how the forbidden frontier grows
-- how bad sequences collapse
-- why naive random search fails
-- why strategic tree choice matters
-
-## Useful Concepts
-
-### Forbidden Frontier
+## Forbidden Frontier
 
 After accepting trees:
-
-```text
+```
 T1, T2, ..., Tn
 ```
 
 the forbidden region is:
-
-```text
+```
 all trees X where some Ti embeds into X
 ```
 
-So every accepted tree removes a whole upward-closed region of the future tree space.
+Every accepted tree removes an upward-closed region from the future tree space.
 
 The program is effectively trying to survive in the remaining space.
 
-### Collapse Phase
+A useful mental model:
 
-A run often starts with large, specific trees.
+Each accepted tree extends the sequence, but also deforms the forbidden frontier.
 
-Later it may accidentally accept smaller, more general trees such as:
+⸻
 
-```text
-2
-3
+## Current Project Structure
+
+Current simplified layout:
+
 ```
-
-or:
-
-```text
-1
-1
-```
-
-These trees block many future candidates.
-
-Eventually the program may reach:
-
-```text
-valid 0
-```
-
-meaning that no valid candidate was found in the current sampled size range.
-
-This is a toy version of the search space freezing.
-
-## Project Structure
-
-Current file layout:
-
-```text
 tree3/
-+-- tree.py
-+-- render_tree3_sequence.py
-+-- tree_log.txt
-+-- tree3_qhd.png
-+-- result.txt
-`-- README.md
+├── tree_core.py
+├── run_experiment.py
+├── train_imitation_model.py
+├── requirements.txt
+├── run_pipeline.bat
+├── README.md
+└── .gitignore
 ```
 
-Suggested future structure:
-
-```text
-tree3/
-+-- tree_model.py      # Tree dataclass and pretty printing
-+-- generator.py       # random tree generation
-+-- embedding.py       # Kruskal/TREE embedding oracle
-+-- search.py          # candidate search and scoring
-+-- main.py
-+-- requirements.txt
-`-- README.md
+Generated files may appear during experiments:
+```
+training_data.csv
+imitation_model.joblib
+__pycache__/
 ```
 
-## Future Improvements
+These are generated artifacts and do not need to be committed.
 
-Possible next steps:
+⸻
 
-- add a full history verifier
-- visualize accepted trees
-- export sequences to JSON
-- compare different scoring functions
-- implement unordered-tree canonicalization
-- implement a faster embedding checker
-- track forbidden-frontier statistics
-- add a simple reinforcement learning environment
-- create an animation of the bad-sequence walk
+## Main Files
+
+### tree_core.py
+
+Contains the core symbolic logic:
+
+* Tree dataclass
+* pretty-printing
+* TREE/Kruskal-style embeds(a, b)
+* random tree generation
+* tree feature extraction
+* history feature extraction
+* heuristic scoring
+* optional sequence verification
+
+### run_experiment.py
+
+Runs benchmark and data collection episodes.
+
+Current agents:
+* random
+* largest  
+* heuristic
+* heuristic_epsilon
+* imitation
+
+The benchmark repeatedly:
+
+1. samples candidate trees
+2. filters valid candidates using the exact embedding oracle
+3. lets an agent choose one valid candidate
+4. appends the chosen tree to history
+5. stops when no valid candidates are found or max_steps is reached
+
+### train_imitation_model.py
+
+Trains a RandomForestClassifier to imitate the hand-written heuristic chooser.
+
+The model learns from rows like:
+```
+history features + candidate features -> chosen / not chosen
+```
+
+It saves:
+```
+imitation_model.joblib
+```
+
+### run_pipeline.bat
+
+Runs the full simple pipeline:
+```
+delete old training_data.csv
+collect heuristic training data  
+train imitation model
+benchmark all agents
+```
+
+⸻
+
+## Running
+
+Install requirements:
+```bash
+pip install -r requirements.txt
+```
+
+Or inside the virtual environment:
+```bash
+myenv\Scripts\activate
+python -m pip install -r requirements.txt
+```
+
+Collect clean heuristic training data:
+```bash
+python run_experiment.py --mode collect --episodes 500
+```
+
+Train imitation model:
+```bash
+python train_imitation_model.py
+```
+
+Benchmark all agents:
+```bash
+python run_experiment.py --mode benchmark --episodes 50
+```
+
+Or run the pipeline:
+```bash
+run_pipeline.bat
+```
+
+⸻
 
 ## Requirements
 
-For now, a short `requirements.txt` could be:
-
-```txt
-numpy
+Current requirements.txt:
+```
+pandas
+scikit-learn
+joblib
 tqdm
 ```
 
-You only need more later if you add machine learning or visualization.
+Note:
+* The pip package is called scikit-learn.
+* The Python import is still sklearn.
+
+Example:
+```python
+from sklearn.ensemble import RandomForestClassifier
+```
+
+⸻
+
+## Current Benchmark Setup
+
+The current useful benchmark uses approximately:
+```
+labels = 3
+candidate size = exactly 6
+attempts_per_move = 3
+max_steps = 300
+episodes = 50
+```
+
+Each move samples only a few candidate trees. This makes the problem nontrivial because the agent must choose well from a small candidate pool.
+
+A representative benchmark result:
+```
+random             avg ~44
+largest            avg ~45
+heuristic          avg ~92
+heuristic_epsilon  avg ~83
+imitation          avg ~88
+```
+
+Interpretation:
+* random and largest are weak under fixed-size candidates.
+* heuristic is currently the strongest hand-written baseline.
+* imitation learns a substantial part of the heuristic behavior and comes close to it.
+
+This shows that the data logging, training, and model-in-the-loop benchmark pipeline works.
+
+⸻
+
+## Imitation Learning
+
+Track A currently uses imitation learning.
+
+The teacher is the hand-written heuristic:
+```python
+def choose_heuristic(valid_candidates):
+    return max(valid_candidates, key=tree_score)
+```
+
+Training data records candidate rows:
+```
+history features
+candidate features  
+chosen yes/no
+```
+
+The imitation model tries to predict which candidate the heuristic would choose.
+
+This is not expected to greatly outperform the heuristic. Its purpose is to prove the ML pipeline:
+```
+environment -> data collection -> training -> model agent -> benchmark
+```
+
+⸻
+
+## Important Limitation
+
+The current imitation model uses handcrafted features such as:
+* tree size
+* height
+* leaf count
+* branching
+* label counts
+* candidate score
+
+This is useful as a first baseline, but it is not the final representation.
+
+A stronger future model should read the tree structure itself, not only handcrafted summaries.
+
+⸻
+
+## Future Direction: Learned Structural Representation
+
+The next serious direction is to let the model learn features from tree structure directly.
+
+Possible approaches:
+* serialize trees as bracketed token sequences
+* encode structural fragments
+* use candidate-conditioned attention over previous tree fragments
+* store full history as external memory
+* retrieve relevant earlier structures instead of compressing history into one vector
+
+The longer-term idea:
+
+The model should learn which structural elements of the history define the dangerous forbidden frontier for a candidate.
+
+This would move beyond handcrafted feature extraction.
+
+⸻
+
+## Possible Next Steps
+
+Short-term:
+* clean up generated files
+* keep training_data.csv and imitation_model.joblib out of Git
+* stabilize benchmark settings
+* add train_value_model.py
+
+Track B:
+* train a value model
+* target: remaining_after_choice
+* use only chosen rows initially
+* compare value model against heuristic
+
+Representation-learning track:
+* add tree serialization
+* log candidate tree strings
+* log history tail or history fragments
+* train a model that reads structure directly
+* later replace handcrafted features
+
+Possible future architecture:
+```
+candidate tree fragments
++
+retrieved history/frontier fragments
++
+candidate-conditioned attention
+->
+candidate value score
+```
+
+⸻
 
 ## Philosophy
 
 This experiment treats TREE not as a number to calculate, but as a survival game in a shrinking space of possible structures.
 
 Each accepted tree is both creation and destruction:
-
-- it extends the sequence
-- but it also forbids a huge class of future trees
+* it extends the sequence
+* but it also forbids a class of future trees
 
 The central question becomes:
 
-> How do you choose a tree that is valid now, but does not destroy the future?
+How do you choose a tree that is valid now, but does not destroy the future?
+
+The current project is a toy environment for exploring that question with symbolic rules and machine learning.
