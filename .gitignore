@@ -32,3 +32,9 @@ Desktop.ini
 
 # Logs
 *.log
+
+# zed
+*.zed
+
+policy_model.pt
+README.html
