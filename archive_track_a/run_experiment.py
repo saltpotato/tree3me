@@ -317,7 +317,8 @@ if __name__ == "__main__":
         "--mode",
         choices=["benchmark", "collect"],
         default="benchmark",
-    )
+    ) 
+    
     parser.add_argument(
         "--episodes",
         type=int,

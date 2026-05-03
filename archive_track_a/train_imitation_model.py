@@ -5,7 +5,6 @@ from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import classification_report, roc_auc_score
 from sklearn.model_selection import train_test_split
 
-
 CSV_PATH = "training_data.csv"
 MODEL_PATH = "imitation_model.joblib"
 
