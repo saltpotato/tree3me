@@ -23,7 +23,7 @@ except Exception:
 # Version / settings
 # -----------------------------
 
-APP_VERSION = "tree3-policy-v0.5-frontier-ac-rollout-signal"
+APP_VERSION = "tree3-policy-v0.6-compressed-frontier-memory"
 
 LABEL_COUNT = 3
 TREE_SIZE = 6
@@ -54,6 +54,7 @@ PRINT_EVERY = 1
 
 MODEL_PATH = "models/policy_model.pt"
 
+MEMORY_SLOTS = 16
 
 VOCAB = {
     "<PAD>": 0,
@@ -229,9 +230,11 @@ class FrontierActorCritic(nn.Module):
 
         self.tree_encoder = TreeEncoder()
 
-        self.q = nn.Linear(D_MODEL, D_MODEL)
-        self.k = nn.Linear(D_MODEL, D_MODEL)
-        self.v = nn.Linear(D_MODEL, D_MODEL)
+        self.memory_queries = nn.Parameter(torch.randn(MEMORY_SLOTS, D_MODEL) * 0.02)
+
+        self.memory_q = nn.Linear(D_MODEL, D_MODEL)
+        self.memory_k = nn.Linear(D_MODEL, D_MODEL)
+        self.memory_v = nn.Linear(D_MODEL, D_MODEL)
 
         self.combine = nn.Sequential(
             nn.LayerNorm(D_MODEL * 4),
@@ -243,6 +246,63 @@ class FrontierActorCritic(nn.Module):
 
         self.policy_head = nn.Linear(D_MODEL, 1)
         self.value_head = nn.Linear(D_MODEL, 1)
+
+    def compress_memory(self, history_vecs: torch.Tensor) -> torch.Tensor:
+        """
+        history_vecs: [H, D]
+        returns: [M, D]
+        """
+        if history_vecs.shape[0] == 0:
+            return torch.zeros(
+                MEMORY_SLOTS,
+                D_MODEL,
+                device=history_vecs.device,
+            )
+
+        q = self.memory_q(self.memory_queries)  # [M, D]
+        k = self.memory_k(history_vecs)          # [H, D]
+        v = self.memory_v(history_vecs)          # [H, D]
+
+        scores = q @ k.T / (D_MODEL ** 0.5)      # [M, H]
+        weights = torch.softmax(scores, dim=1)
+
+        return weights @ v                       # [M, D]
+
+
+    def score_candidates_from_memory(
+        self,
+        history_vecs: torch.Tensor,
+        candidate_tokens: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+
+        candidate_vecs = self.tree_encoder(candidate_tokens)  # [K, D]
+
+        compressed = self.compress_memory(history_vecs)        # [M, D]
+
+        q = self.q(candidate_vecs)   # [K, D]
+        k = self.k(compressed)       # [M, D]
+        v = self.v(compressed)       # [M, D]
+
+        attn_scores = q @ k.T / (D_MODEL ** 0.5)  # [K, M]
+        attn_weights = torch.softmax(attn_scores, dim=1)
+        frontier_context = attn_weights @ v       # [K, D]
+
+        x = torch.cat(
+            [
+                candidate_vecs,
+                frontier_context,
+                candidate_vecs * frontier_context,
+                torch.abs(candidate_vecs - frontier_context),
+            ],
+            dim=1,
+        )
+
+        z = self.combine(x)
+
+        policy_logits = self.policy_head(z).squeeze(-1)
+        values = self.value_head(z).squeeze(-1)
+
+        return policy_logits, values
 
     def score_candidates(
         self,
@@ -308,11 +368,13 @@ def run_episode(
     greedy: bool = False,
 ) -> EpisodeResult:
     rewards: list[float] = []
-    history: list[Tree] = []
-
+    
     log_probs: list[torch.Tensor] = []
     entropies: list[torch.Tensor] = []
     chosen_values: list[torch.Tensor] = []
+
+    history: list[Tree] = []
+    history_vecs: list[torch.Tensor] = []
 
     while len(history) < MAX_STEPS:
         valid_candidates = generate_valid_candidates(history)
@@ -320,10 +382,18 @@ def run_episode(
         if not valid_candidates:
             break
 
-        history_tokens = encode_tree_batch(history, device)
+        if history_vecs:
+            history_memory = torch.stack(history_vecs).to(device)
+        else:
+            history_memory = torch.empty((0, D_MODEL), device=device)
+
         candidate_tokens = encode_tree_batch(valid_candidates, device)
 
-        logits, values = model.score_candidates(history_tokens, candidate_tokens)
+        logits, values = model.score_candidates_from_memory(
+            history_memory,
+            candidate_tokens,
+        )
+
         probs = torch.softmax(logits, dim=0)
 
         if greedy:
@@ -351,6 +421,13 @@ def run_episode(
 
             rewards.append(1.0 + ROLLOUT_BONUS_WEIGHT * bonus)
             history.append(chosen)
+
+        # Encode the chosen tree once and store detached memory vector.
+        with torch.no_grad():
+            chosen_tokens = encode_tree_batch([chosen], device)
+            chosen_vec = model.tree_encoder(chosen_tokens).squeeze(0).detach()
+
+        history_vecs.append(chosen_vec)
             
     length = len(history)
 
@@ -483,8 +560,8 @@ def main() -> None:
     print("training learned-frontier actor-critic")
     print("full history forest")
     print("no imitation labels")
-    print("no tree_score")
-    print("reward = episode length")
+    print("no tree_score as model input")
+    print("reward = episode length + sparse rollout bonus")
     print()
 
     start_progress_server(host="0.0.0.0", port=80, model_path=MODEL_PATH)
