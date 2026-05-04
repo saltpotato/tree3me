@@ -23,7 +23,7 @@ except Exception:
 # Version / settings
 # -----------------------------
 
-APP_VERSION = "tree3-policy-v0.6-compressed-frontier-memory"
+APP_VERSION = "tree3-policy-v0.7-cosine-lr-stable-memory"
 
 LABEL_COUNT = 3
 TREE_SIZE = 6
