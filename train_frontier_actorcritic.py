@@ -8,6 +8,7 @@ import torch.nn.functional as F
 from torch import nn
 
 from tree_core import Tree, embeds, random_tree_exact_size
+import time
 
 try:
     from progress_server import STATUS, start_progress_server
@@ -46,8 +47,10 @@ EVAL_EVERY = 250
 EVAL_EPISODES = 50
 
 ROLLOUT_BONUS_WEIGHT = 0.05
-ROLLOUT_BONUS_COUNT = 2
-ROLLOUT_BONUS_MAX_EXTRA_STEPS = 80
+ROLLOUT_BONUS_COUNT = 1
+ROLLOUT_BONUS_MAX_EXTRA_STEPS = 20
+ROLLOUT_BONUS_EVERY_N_MOVES = 10
+PRINT_EVERY = 1
 
 MODEL_PATH = "models/policy_model.pt"
 
@@ -339,10 +342,16 @@ def run_episode(
         if greedy:
             history.append(chosen)
         else:
-            bonus = estimate_choice_bonus(history, chosen)
+            move_index = len(history) + 1
+
+            if move_index % ROLLOUT_BONUS_EVERY_N_MOVES == 0:
+                bonus = estimate_choice_bonus(history, chosen)
+            else:
+                bonus = 0.0
+
             rewards.append(1.0 + ROLLOUT_BONUS_WEIGHT * bonus)
             history.append(chosen)
-
+            
     length = len(history)
 
     if greedy:
@@ -501,12 +510,16 @@ def main() -> None:
     for episode in range(1, TRAIN_EPISODES + 1):
         model.train()
 
+        start_time = time.time()
+
         result = run_episode(
             model=model,
             optimizer=optimizer,
             device=device,
             greedy=False,
         )
+
+        elapsed = time.time() - start_time
 
         recent_lengths.append(result.length)
         if len(recent_lengths) > 100:
@@ -534,7 +547,8 @@ def main() -> None:
                 f"episode {episode:5d} | "
                 f"length {result.length:4d} | "
                 f"avg100 {avg_recent:7.2f} | "
-                f"loss {result.loss.item() if result.loss is not None else 0.0:9.4f}"
+                f"loss {result.loss.item() if result.loss is not None else 0.0:9.4f} | "
+                f"time {elapsed:6.2f}s"
             )
 
         if episode % EVAL_EVERY == 0:
