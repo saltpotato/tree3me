@@ -22,7 +22,7 @@ except Exception:
 # Version / settings
 # -----------------------------
 
-APP_VERSION = "tree3-policy-v0.4-learned-frontier-actorcritic"
+APP_VERSION = "tree3-policy-v0.5-frontier-ac-rollout-signal"
 
 LABEL_COUNT = 3
 TREE_SIZE = 6
@@ -44,6 +44,10 @@ TRAIN_EPISODES = 5000
 PRINT_EVERY = 50
 EVAL_EVERY = 250
 EVAL_EPISODES = 50
+
+ROLLOUT_BONUS_WEIGHT = 0.05
+ROLLOUT_BONUS_COUNT = 2
+ROLLOUT_BONUS_MAX_EXTRA_STEPS = 80
 
 MODEL_PATH = "models/policy_model.pt"
 
@@ -113,6 +117,44 @@ def generate_valid_candidates(history: list[Tree]) -> list[Tree]:
 
     return candidates
 
+def choose_rollout_policy(valid_candidates: list[Tree]) -> Tree:
+    # Keep it simple and stable: mostly heuristic, sometimes random.
+    if random.random() < 0.20:
+        return random.choice(valid_candidates)
+
+    # Import/use tree_score only for rollout evaluation, not as model input.
+    from tree_core import tree_score
+    return max(valid_candidates, key=tree_score)
+
+
+def rollout_after_choice(history_after_choice: list[Tree]) -> int:
+    h = list(history_after_choice)
+    start_len = len(h)
+    max_len = min(MAX_STEPS, start_len + ROLLOUT_BONUS_MAX_EXTRA_STEPS)
+
+    while len(h) < max_len:
+        valid = generate_valid_candidates(h)
+
+        if not valid:
+            break
+
+        h.append(choose_rollout_policy(valid))
+
+    return len(h) - start_len
+
+
+def estimate_choice_bonus(history: list[Tree], chosen: Tree) -> float:
+    scores = []
+
+    for _ in range(ROLLOUT_BONUS_COUNT):
+        h = list(history)
+        h.append(chosen)
+        scores.append(rollout_after_choice(h))
+
+    best = max(scores) if scores else 0
+
+    # Normalize to roughly 0..1
+    return best / max(1, ROLLOUT_BONUS_MAX_EXTRA_STEPS)
 
 # -----------------------------
 # Model
@@ -262,6 +304,7 @@ def run_episode(
     device: str,
     greedy: bool = False,
 ) -> EpisodeResult:
+    rewards: list[float] = []
     history: list[Tree] = []
 
     log_probs: list[torch.Tensor] = []
@@ -291,7 +334,14 @@ def run_episode(
             entropies.append(dist.entropy())
             chosen_values.append(values[choice_index])
 
-        history.append(valid_candidates[choice_index])
+        chosen = valid_candidates[choice_index]
+
+        if greedy:
+            history.append(chosen)
+        else:
+            bonus = estimate_choice_bonus(history, chosen)
+            rewards.append(1.0 + ROLLOUT_BONUS_WEIGHT * bonus)
+            history.append(chosen)
 
     length = len(history)
 
@@ -304,10 +354,17 @@ def run_episode(
 
     # Return-to-go: if episode length is N, first move has N reward left,
     # second has N-1, etc.
-    returns = torch.arange(
-        len(log_probs),
-        0,
-        -1,
+    returns_list = []
+    running = 0.0
+
+    for r in reversed(rewards):
+        running += r
+        returns_list.append(running)
+
+    returns_list.reverse()
+
+    returns = torch.tensor(
+        returns_list,
         dtype=torch.float32,
         device=device,
     )
