@@ -425,7 +425,7 @@ def run_episode(
         # Encode the chosen tree once and store detached memory vector.
         with torch.no_grad():
             chosen_tokens = encode_tree_batch([chosen], device)
-            chosen_vec = model.tree_encoder(chosen_tokens).squeeze(0).detach()
+            chosen_vec = model.tree_encoder(chosen_tokens).squeeze(0)
 
         history_vecs.append(chosen_vec)
             
@@ -458,8 +458,10 @@ def run_episode(
     # Normalize returns per episode for stability.
     returns_norm = returns
     if len(returns_norm) > 1:
-        returns_norm = (returns_norm - returns_norm.mean()) / (returns_norm.std() + 1e-6)
-
+        std = returns_norm.std()
+        if std > 1.0:  # only normalize if variance is meaningful
+            returns_norm = (returns_norm - returns_norm.mean()) / (std + 1e-6)
+    
     log_probs_t = torch.stack(log_probs)
     entropies_t = torch.stack(entropies)
     values_t = torch.stack(chosen_values)
@@ -581,6 +583,9 @@ def main() -> None:
         lr=LR,
         weight_decay=1e-4,
     )
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+        optimizer, T_max=TRAIN_EPISODES, eta_min=1e-6
+    )
 
     recent_lengths: list[int] = []
 
@@ -595,6 +600,7 @@ def main() -> None:
             device=device,
             greedy=False,
         )
+        scheduler.step()
 
         elapsed = time.time() - start_time
 
@@ -631,7 +637,10 @@ def main() -> None:
         if episode % EVAL_EVERY == 0:
             eval_stats = evaluate(model, device)
 
-            save_model(model)
+            if eval_stats["avg"] > best_avg:
+                best_avg = eval_stats["avg"]
+                save_model(model)
+                print(f"new best: {best_avg:.2f} → saved")  
 
             if STATUS is not None:
                 STATUS.update(
