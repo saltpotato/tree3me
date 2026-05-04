@@ -12,6 +12,7 @@ class TrainingStatus:
     def __init__(self) -> None:
         self._lock = threading.Lock()
         self.data: dict[str, Any] = {
+            "version": "unknown",
             "status": "starting",
             "episode": 0,
             "train_episodes": None,
@@ -95,6 +96,7 @@ def _html_page(data: dict[str, Any]) -> str:
 
   <div class="card">
     <table>
+      <tr><td>Version</td><td><code>{data.get("version")}</code></td></tr>
       <tr><td>Status</td><td><b>{data.get("status")}</b></td></tr>
       <tr><td>Episode</td><td>{data.get("episode")} / {data.get("train_episodes")}</td></tr>
       <tr><td>Last length</td><td>{data.get("last_length")}</td></tr>

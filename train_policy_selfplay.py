@@ -13,10 +13,11 @@ from tree_core import Tree, embeds, random_tree_exact_size, verify_history
 # -----------------------------
 # Settings
 # -----------------------------
+APP_VERSION = "tree3-policy-v0.2-actorcritic-test"
 
 LABEL_COUNT = 3
 TREE_SIZE = 6
-ATTEMPTS_PER_MOVE = 3
+ATTEMPTS_PER_MOVE = 5
 MAX_STEPS = 300
 HISTORY_TAIL_SIZE = 6
 
@@ -26,12 +27,12 @@ N_HEAD = 4
 N_LAYERS = 3
 D_FF = 192
 
-LR = 1e-4
-ENTROPY_BONUS = 0.01
+LR = 5e-5
+ENTROPY_BONUS = 0.003
 TRAIN_EPISODES = 5000
 PRINT_EVERY = 50
 EVAL_EVERY = 250
-EVAL_EPISODES = 30
+EVAL_EPISODES = 50
 
 MODEL_PATH = "models/policy_model.pt"
 
@@ -288,7 +289,7 @@ def run_episode(
 
 def evaluate(
     model: StructuralPolicyNet, device: str, episodes: int = EVAL_EPISODES
-) -> None:
+) -> dict:
     lengths = []
 
     model.eval()
@@ -347,6 +348,7 @@ def main():
         status="training",
         train_episodes=TRAIN_EPISODES,
         model_path=MODEL_PATH,
+        version=APP_VERSION,
     )
 
     model = StructuralPolicyNet().to(device)
@@ -394,7 +396,7 @@ def main():
             )
 
         if episode % EVAL_EVERY == 0:
-            evaluate(model, device)
+            eval_stats = evaluate(model, device)
 
             STATUS.update(
                 status="training",
@@ -422,7 +424,7 @@ def main():
 
     print()
     print("final eval")
-    evaluate(model, device)
+    final_eval_stats = evaluate(model, device)
 
     torch.save(
         {
@@ -438,6 +440,7 @@ def main():
         episode=TRAIN_EPISODES,
         train_episodes=TRAIN_EPISODES,
         done=True,
+        last_eval=final_eval_stats,
         model_path=MODEL_PATH,
     )
 
@@ -445,4 +448,5 @@ def main():
 
 
 if __name__ == "__main__":
+    print(f"version: {APP_VERSION}")
     main()
