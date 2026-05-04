@@ -217,24 +217,24 @@ class TreeEncoder(nn.Module):
 
 
 class FrontierActorCritic(nn.Module):
-    """
-    For each candidate:
-      - encode candidate tree
-      - encode all history trees
-      - candidate attends over history tree embeddings
-      - output policy logit and value estimate
-    """
-
     def __init__(self):
         super().__init__()
 
         self.tree_encoder = TreeEncoder()
 
-        self.memory_queries = nn.Parameter(torch.randn(MEMORY_SLOTS, D_MODEL) * 0.02)
+        # Compress full history memory into learned frontier slots
+        self.memory_queries = nn.Parameter(
+            torch.randn(MEMORY_SLOTS, D_MODEL) * 0.02
+        )
 
         self.memory_q = nn.Linear(D_MODEL, D_MODEL)
         self.memory_k = nn.Linear(D_MODEL, D_MODEL)
         self.memory_v = nn.Linear(D_MODEL, D_MODEL)
+
+        # Candidate attends over compressed frontier memory
+        self.q = nn.Linear(D_MODEL, D_MODEL)
+        self.k = nn.Linear(D_MODEL, D_MODEL)
+        self.v = nn.Linear(D_MODEL, D_MODEL)
 
         self.combine = nn.Sequential(
             nn.LayerNorm(D_MODEL * 4),
